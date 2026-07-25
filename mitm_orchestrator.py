@@ -20,11 +20,12 @@ PACKET_SIZE = pu.PACKET_SIZE if HAS_PACKET_UTILS else 272
 
 
 class MitmOrchestrator:
-    def __init__(self, mode, target_str=None, replace_str=None, inject_msg=None):
+    def __init__(self, mode, target_str=None, replace_str=None, inject_msg=None, delay_sec=5):
         self.mode = mode
         self.target_str = target_str
         self.replace_str = replace_str
         self.inject_msg = inject_msg
+        self.delay_sec = delay_sec
         self.replay_cache = []  
 
     def compute_crc32(self, data_bytes):
@@ -33,8 +34,12 @@ class MitmOrchestrator:
 
     def run(self):
         """Launches the primary pipeline intercept engine."""
+        # Standalone attack modes that bypass Node A entirely
         if self.mode == "inject":
             self.execute_standalone_injection()
+            return
+        elif self.mode == "malformed":
+            self.execute_malformed_injection()
             return
 
         print(f"[*] Initializing Active Intercept Layer. Strategy: [{self.mode.upper()}]")
@@ -53,7 +58,6 @@ class MitmOrchestrator:
 
         while True:
             try:
-                # Clean byte extraction matching 272-byte boundary
                 raw_packet = os.read(fd_in, PACKET_SIZE)
                 if not raw_packet:
                     print("[*] Stream terminated by Sender. Awaiting reconnection context...")
@@ -104,10 +108,19 @@ class MitmOrchestrator:
                 print(f"  └── Computed Telemetry CRC32 : {hex(crc).upper()}")
                 print("="*60 + "\033[0m")
 
+                ''' --- ACTIVE ATTACK LOGIC MATRIX --- '''
+
+                '''1. Packet Dropping '''
+                if self.mode == "drop":
+                    print("\n\033[91m[!] DROP MODE: Packet intentionally dropped. Simulating packet loss...\033[0m\n")
+                    continue  # Skip forwarding completely
+
+                ''' 2. Replay Caching '''
                 if self.mode == "replay":
                     self.replay_cache.append(raw_packet)
                     print(f"[+] Replay Subsystem: Cached valid 272-byte encrypted frame.")
 
+                ''' 3. Packet Modification (Tamper) '''
                 if self.mode == "tamper":
                     print(f"\n\033[91m[!] TAMPER MODE: Modifying ciphertext bytes to attack integrity...")
                     byte_arr = bytearray(raw_packet)
@@ -116,8 +129,16 @@ class MitmOrchestrator:
                     print(f"  ├── Mutator: Modified byte offset 100 in ciphertext block.")
                     print(f"  └── Structure Pack: Forwarding corrupted 272-byte frame to Node B.\033[0m\n")
 
+                ''' 4. Packet Delay '''
+                if self.mode == "delay":
+                    print(f"\n\033[33m[!] DELAY MODE: Holding packet for {self.delay_sec} seconds before forwarding...\033[0m")
+                    time.sleep(self.delay_sec)
+                    print(f"    └── Forwarding delayed packet now.\n")
+
+                ''' Forward intercepted (or tampered/delayed) packet to Node B '''
                 os.write(fd_out, raw_packet)
 
+                ''' Execute Replay (Duplication) '''
                 if self.mode == "replay" and len(self.replay_cache) > 0:
                     time.sleep(2) 
                     print("\n\033[33m[!] REPLAY ATTACK EXECUTION: Re-injecting historical state frame...")
@@ -175,14 +196,45 @@ class MitmOrchestrator:
         except Exception as e:
             print(f"[-] Critical injection processing crash occurred: {e}")
 
+    def execute_malformed_injection(self):
+        """MALFORMED PACKET INJECTION"""
+        print(f"[*] Initializing Malformed Packet Injection Engine...")
+        print(f"[*] Bypassing Node A entirely. Establishing target channel access link...")
+        
+        try:
+            fd_out = os.open(PIPE_OUT, os.O_WRONLY)
+            
+            """ Generate highly random entropy bytes simulating severe corruption """
+            garbage_packet = os.urandom(PACKET_SIZE)
+
+            print("\n\033[91m" + "!"*60)
+            print(f"[MALFORMED INJECTION DISPATCHED] Sending structurally invalid garbage data")
+            print(f"  ├── Action: Violating protocol headers and expected structure")
+            print(f"  └── Total Outflow Frame : {len(garbage_packet)} Random Bytes Packed")
+            print("!"*60 + "\033[0m\n")
+            
+            os.write(fd_out, garbage_packet)
+            os.close(fd_out)
+            
+        except Exception as e:
+            print(f"[-] Critical malformed injection processing crash occurred: {e}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="IITI SOC 2026 Track 3 Cyber Engine")
-    parser.add_argument('--mode', choices=['sniff', 'tamper', 'replay', 'inject'], required=True)
+    # Added drop, delay, and malformed to the argument choices
+    parser.add_argument('--mode', choices=['sniff', 'tamper', 'replay', 'inject', 'drop', 'delay', 'malformed'], required=True)
     parser.add_argument('--target', type=str, help="Target keyword to match during tampering loops.")
     parser.add_argument('--replace', type=str, help="Replacement text to write over target entries.")
     parser.add_argument('--message', type=str, default="HELLO FROM NODE A", help="Data block payload for injection runs.")
+    parser.add_argument('--delay', type=int, default=5, help="Seconds to delay the packet (used in --mode delay).")
     
     args = parser.parse_args()
-    engine = MitmOrchestrator(mode=args.mode, target_str=args.target, replace_str=args.replace, inject_msg=args.message)
+    engine = MitmOrchestrator(
+        mode=args.mode, 
+        target_str=args.target, 
+        replace_str=args.replace, 
+        inject_msg=args.message,
+        delay_sec=args.delay
+    )
     engine.run()
