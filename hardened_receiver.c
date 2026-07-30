@@ -358,10 +358,7 @@ int process_secure_packet(Packet *pkt, char *plaintext_out) {
     printf("[*] Auth Tag: ");
     print_hex("", pkt->tag, 8);
 
-    /* === LAYER 1 OF 2: Verify HMAC-SHA256 (independent of GCM tag) ===
-       Recompute HMAC over (AAD || GCM tag || ciphertext) and compare
-       against the value the sender stored in pkt->salt. This must
-       match exactly what the sender computed in build_secure_packet(). */
+    /* === LAYER 1 OF 2: Verify HMAC-SHA256 (independent of GCM tag) === */
     {
         uint8_t hmac_input[16 + TAG_SIZE + MAX_PAYLOAD];
         int pos = 0;
@@ -437,101 +434,79 @@ int main(int argc, char *argv[]) {
     printf("    Replay Protection: 32-bit Sequence Counter\n");
     printf("    Max Sequence Window: %d packets\n\n", MAX_SEQUENCE_WINDOW);
     
-    /* Create input pipe
-       NOTE: matches the pipe the hardened sender writes to
-       (/tmp/secure_nodeA_to_attacker). If you reintroduce a MITM
-       relay/orchestrator between sender and receiver, point the
-       relay's output pipe here instead and revert this to a
-       distinct name (e.g. /tmp/secure_attacker_to_nodeB). */
     const char *pipe_from_attacker = "/tmp/secure_nodeA_to_attacker";
     mkfifo(pipe_from_attacker, 0666);
     
-    printf("[*] Opening secure channel: %s\n", pipe_from_attacker);
-    printf("[*] Waiting for encrypted packets...\n");
+    printf("[*] Server active on secure channel: %s\n", pipe_from_attacker);
+    printf("[*] Listening continuously for incoming encrypted packets...\n");
     printf("    (Press Ctrl+C to stop listening)\n\n");
-    
-    int fd = open(pipe_from_attacker, O_RDONLY);
-    if(fd < 0) {
-        perror("[-] Failed to open pipe");
-        return 1;
-    }
     
     Packet pkt;
     char plaintext_buffer[MAX_PAYLOAD + 1];
     int packet_count = 0;
     
-    /* Receive and process packets */
+    /* Infinite listener loop: keeps the terminal running indefinitely */
     while(1) {
-        ssize_t bytes_read = read(fd, &pkt, sizeof(Packet));
-        
-        if(bytes_read == 0) {
-            printf("\n[*] Pipe closed by sender\n");
-            break;
-        }
-        
-        if(bytes_read < 0) {
-            perror("[-] Read error");
-            break;
-        }
-        
-        if(bytes_read != sizeof(Packet)) {
-            fprintf(stderr, "[-] Incomplete packet: %ld / %zu bytes\n", bytes_read, sizeof(Packet));
-            stats.malformed_packets++;
+        /* open() will block until a sender/writer connects to the FIFO */
+        int fd = open(pipe_from_attacker, O_RDONLY);
+        if(fd < 0) {
+            perror("[-] Failed to open pipe");
+            sleep(1);
             continue;
         }
         
-        packet_count++;
-        stats.total_received++;
-        
-        printf("\n\n");
-        printf("****** PACKET %d ******\n", packet_count);
-        
-        /* Process security validations */
-        int result = process_secure_packet(&pkt, plaintext_buffer);
-        
-        if(result >= 0) {
-            stats.total_valid++;
+        /* Receive and process packets from the connected sender */
+        while(1) {
+            ssize_t bytes_read = read(fd, &pkt, sizeof(Packet));
+            
+            if(bytes_read == 0) {
+                /* Sender disconnected/closed pipe */
+                printf("\n[*] Sender disconnected. Waiting for next batch...\n");
+                break;
+            }
+            
+            if(bytes_read < 0) {
+                perror("[-] Read error");
+                break;
+            }
+            
+            if(bytes_read != sizeof(Packet)) {
+                fprintf(stderr, "[-] Incomplete packet: %ld / %zu bytes\n", bytes_read, sizeof(Packet));
+                stats.malformed_packets++;
+                continue;
+            }
+            
+            packet_count++;
+            stats.total_received++;
+            
+            printf("\n\n");
+            printf("****** PACKET %d ******\n", packet_count);
+            
+            /* Process security validations */
+            int result = process_secure_packet(&pkt, plaintext_buffer);
+            
+            if(result >= 0) {
+                stats.total_valid++;
+            }
         }
+        
+        close(fd);
+        
+        /* Display continuous running stats summary on sender disconnect */
+        printf("\n========================================================\n");
+        printf("RUNNING STATS SUMMARY\n");
+        printf("========================================================\n");
+        printf("Total Packets Received         : %d\n", stats.total_received);
+        printf("Valid/Decrypted Packets       : %d\n", stats.total_valid);
+        printf("Failed Packets                : %d\n", stats.total_received - stats.total_valid);
+        printf("Authentication Failures       : %d\n", stats.auth_failures);
+        printf("Replay Attacks Detected       : %d\n", stats.replay_detections);
+        printf("Malformed Packets             : %d\n", stats.malformed_packets);
+        printf("Decryption Errors             : %d\n", stats.decryption_errors);
+        printf("Total Bytes Decrypted         : %lu bytes\n", stats.total_bytes_decrypted);
+        printf("========================================================\n");
+        printf("[*] Listening for next sender connection...\n\n");
     }
-    
-    close(fd);
-    
-    /* Print statistics */
-    printf("\n\n");
-    printf("========================================================\n");
-    printf("RECEIVER STATISTICS\n");
-    printf("========================================================\n");
-    printf("Total Packets Received         : %d\n", stats.total_received);
-    printf("Valid/Decrypted Packets       : %d\n", stats.total_valid);
-    printf("Failed Packets                : %d\n", 
-           stats.total_received - stats.total_valid);
-    printf("Authentication Failures       : %d\n", stats.auth_failures);
-    printf("Replay Attacks Detected       : %d\n", stats.replay_detections);
-    printf("Malformed Packets             : %d\n", stats.malformed_packets);
-    printf("Decryption Errors             : %d\n", stats.decryption_errors);
-    printf("Total Bytes Decrypted         : %lu bytes\n", stats.total_bytes_decrypted);
-    printf("========================================================\n\n");
-    
-    printf("SECURITY VALIDATION SUMMARY:\n");
-    printf("  ✓ Confidentiality Verified: AES-256-GCM Decryption\n");
-    printf("  ✓ Integrity Verified: HMAC-SHA256 Authentication Tag\n");
-    printf("  ✓ Authenticity Verified: GCM Authenticated Encryption\n");
-    printf("  ✓ Replay Attacks Detected: %d attempts blocked\n\n", stats.replay_detections);
     
     return 0;
 }
-
-/* =====================================================
-   COMPILATION INSTRUCTIONS:
-   
-   gcc -o hardened_receiver hardened_receiver.c \
-       -lssl -lcrypto -lm
-   
-   REQUIREMENTS:
-   - OpenSSL development libraries
-   - Linux with named pipes support
-   
-   RUN:
-   ./hardened_receiver
-   
-   ===================================================== */
