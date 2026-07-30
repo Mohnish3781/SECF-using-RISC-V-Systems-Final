@@ -253,7 +253,7 @@ int build_secure_packet(
     /* === BUILD AAD (Additional Authenticated Data) === */
     /* AAD = header || type || src_id || dest_id || length || seq || timestamp */
     /* (authenticated but NOT encrypted) */
-    uint8_t aad_buffer[16];
+    uint8_t aad_buffer[32];
     int aad_pos = 0;
     
     memcpy(aad_buffer + aad_pos, &pkt->header, 4);
