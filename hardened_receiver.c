@@ -335,7 +335,7 @@ int process_secure_packet(Packet *pkt, char *plaintext_out) {
     printf("          ----------------------------\n");
     
     /* Build AAD (same as sender) */
-    uint8_t aad_buffer[16];
+    uint8_t aad_buffer[32];
     int aad_pos = 0;
     
     memcpy(aad_buffer + aad_pos, &pkt->header, 4);
