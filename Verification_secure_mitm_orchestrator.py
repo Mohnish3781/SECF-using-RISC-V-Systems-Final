@@ -2,33 +2,11 @@
 """
 IITI SOC 2026 - PS8 Final Evaluation
 SECURE MITM ORCHESTRATOR - Attacks the HARDENED protocol
-Mirrors mitm_orchestrator.py (baseline) but targets the AES-256-GCM +
-HMAC-SHA256 + sequence-counter protocol from hardened_sender/receiver.
 
-PURPOSE: Demonstrate that the four attacks which succeeded against the
-baseline (sniff, tamper, replay, inject) now FAIL against the hardened
-protocol. This script does the interception/tampering/replay/forgery;
-the *failure* is visible in the hardened_receiver's own output
-(HMAC verification failed / GCM tag failed / replay detected), because
-this script does NOT have session_key or hmac_key — exactly like a
-real network attacker.
-
-PIPE TOPOLOGY FOR THIS DEMO (different from direct sender<->receiver
-testing):
-    hardened_sender  --> /tmp/secure_nodeA_to_attacker --> [this script] --> /tmp/secure_attacker_to_nodeB --> hardened_receiver
-
-Before running this demo, point the receiver at the relay's output pipe
-instead of listening directly on the sender's pipe:
-  in hardened_receiver_complete.c, set:
-    const char *pipe_from_attacker = "/tmp/secure_attacker_to_nodeB";
-  (recompile). For direct sender<->receiver testing with no MITM in the
-  loop, keep it as "/tmp/secure_nodeA_to_attacker" instead.
-
-USAGE (matches the baseline script's CLI):
-  python3 secure_mitm_orchestrator.py --mode sniff
-  python3 secure_mitm_orchestrator.py --mode tamper
-  python3 secure_mitm_orchestrator.py --mode replay
-  python3 secure_mitm_orchestrator.py --mode inject --message "FORGED COMMAND"
+MODIFIED VERSION:
+- Formatted output matching baseline mitm_orchestrator.py (CRC32, stylized logs)
+- Auto-creates named pipes if missing
+- Remains open forever in the terminal (handles reconnects & idle loops)
 """
 
 import os
@@ -36,11 +14,12 @@ import sys
 import struct
 import time
 import argparse
+import binascii
 
 PIPE_IN = "/tmp/secure_nodeA_to_attacker"
 PIPE_OUT = "/tmp/secure_attacker_to_nodeB"
 
-# --- HARDENED PACKET FORMAT (must match the packed C struct exactly) ---
+# --- HARDENED PACKET FORMAT (317 bytes) ---
 # header(4) type(1) src(1) dest(1) length(2) seq(4) timestamp(4)
 # nonce(12) salt(16, carries HMAC) tag(16, GCM auth tag) payload(256)
 PACKET_FORMAT = "<IBBBHII12s16s16s256s"
@@ -53,71 +32,89 @@ class SecureMitmOrchestrator:
         self.inject_msg = inject_msg
         self.replay_cache = []
 
+    def compute_crc32(self, data_bytes):
+        """Computes unsigned 32-bit CRC checksum for telemetry logging."""
+        return binascii.crc32(data_bytes) & 0xFFFFFFFF
+
+    def ensure_pipes_exist(self):
+        """Auto-creates named pipes if they do not exist yet."""
+        if not os.path.exists(PIPE_IN):
+            os.mkfifo(PIPE_IN)
+            print(f"[+] Auto-created missing input pipe: {PIPE_IN}")
+        if not os.path.exists(PIPE_OUT):
+            os.mkfifo(PIPE_OUT)
+            print(f"[+] Auto-created missing output pipe: {PIPE_OUT}")
+
     def run(self):
+        self.ensure_pipes_exist()
+
         if self.mode == "inject":
             self.execute_standalone_injection()
             return
 
         print(f"[*] Initializing Active Intercept Layer vs HARDENED protocol. Strategy: [{self.mode.upper()}]")
-        print(f"[*] Packet size expected: {PACKET_SIZE} bytes\n")
+        print(f"[*] Expected Frame Size: {PACKET_SIZE} Bytes\n")
 
-        if not os.path.exists(PIPE_IN):
-            print(f"[-] Missing pipe: {PIPE_IN} (start hardened_sender's mkfifo first, or run the sender once)")
-            sys.exit(1)
-
+        print("[*] Opening Channel Read Target (Listening to Node A)...")
         fd_in = os.open(PIPE_IN, os.O_RDONLY)
-        if not os.path.exists(PIPE_OUT):
-            os.mkfifo(PIPE_OUT)
+
+        print("[*] Opening Channel Write Target (Forwarding to Node B)...")
         fd_out = os.open(PIPE_OUT, os.O_WRONLY)
-        print("[+] Proxy routing channels engaged.\n")
+
+        print("[+] Proxy routing channels engaged seamlessly.\n")
 
         while True:
             try:
                 raw_packet = os.read(fd_in, PACKET_SIZE)
                 if not raw_packet:
-                    print("[*] Stream terminated by sender.")
-                    break
+                    print("[*] Stream terminated by Sender. Awaiting reconnection context...")
+                    os.close(fd_in)
+                    fd_in = os.open(PIPE_IN, os.O_RDONLY)
+                    time.sleep(0.5)
+                    continue
+
                 if len(raw_packet) < PACKET_SIZE:
-                    print(f"[-] Incomplete frame ({len(raw_packet)}/{PACKET_SIZE}). Skipping.")
+                    print(f"[-] Received incomplete frame ({len(raw_packet)}/{PACKET_SIZE} bytes). Skipping...")
                     continue
 
                 (magic, ptype, src_id, dest_id, length, seq, timestamp,
                  nonce, salt, tag, payload) = struct.unpack(PACKET_FORMAT, raw_packet)
 
-                print("\033[94m" + "=" * 60)
-                print(f"[INTERCEPTED FRAME] Sequence: {seq}")
-                print(f"  ├── Magic     : {hex(magic).upper()}")
-                print(f"  ├── Src->Dst  : {src_id} -> {dest_id}")
-                print(f"  ├── Nonce     : {nonce.hex()}")
-                print(f"  ├── HMAC(salt): {salt.hex()}")
-                print(f"  ├── GCM Tag   : {tag.hex()}")
-                # This is the whole point: without session_key, this is NOT
-                # the plaintext. Compare to the baseline demo where this
-                # line printed a readable string.
-                print(f"  └── \"Payload\" bytes (ciphertext, unreadable): {payload[:length].hex()[:48]}...")
-                print("=" * 60 + "\033[0m")
+                crc = self.compute_crc32(raw_packet)
 
+                # Matching baseline mitm_orchestrator.py display structure
+                print("\033[94m" + "=" * 60)
+                print(f"[INTERCEPTED FRAME] Sequence Index: {seq}")
+                print(f"  ├── Magic Identifier : {hex(magic).upper()}")
+                print(f"  ├── Source Node ID   : {src_id}")
+                print(f"  ├── Destination ID   : {dest_id}")
+                print(f"  ├── Packet Type Tag  : {ptype}")
+                print(f"  ├── Ciphertext Hex   : {payload[:24].hex()}... ({length} Bytes Payload)")
+                print(f"  ├── AES Nonce (12B)  : {nonce.hex()}")
+                print(f"  ├── HMAC / Salt(16B) : {salt.hex()}")
+                print(f"  ├── GCM Tag (16B)    : {tag.hex()}")
+                
                 if self.mode == "sniff":
                     try:
                         decoded_attempt = payload[:length].decode("utf-8")
-                        print(f"[!] Unexpected: payload decoded as text: {decoded_attempt}")
+                        print(f"  ├── [!] Decoded Payload Text : \"{decoded_attempt}\"")
                     except UnicodeDecodeError:
-                        print("[+] Confirmed: intercepted bytes are NOT valid UTF-8 text.")
-                        print("    Confidentiality holds — AES-256-GCM ciphertext, no key available to this script.\n")
+                        print("  ├── [+] Confidentiality Check : Encrypted Ciphertext (Not valid UTF-8 text)")
+
+                print(f"  └── Computed Telemetry CRC32 : {hex(crc).upper()}")
+                print("=" * 60 + "\033[0m")
 
                 if self.mode == "replay":
                     self.replay_cache.append(raw_packet)
-                    print("[+] Replay subsystem: cached this valid encrypted frame.\n")
+                    print(f"[+] Replay Subsystem: Cached valid {PACKET_SIZE}-byte encrypted frame.\n")
 
                 if self.mode == "tamper":
-                    # Flip a byte in the ciphertext payload, like the baseline
-                    # attack, but WITHOUT being able to recompute a valid GCM
-                    # tag or HMAC (we don't have the keys). This should make
-                    # the receiver reject the frame.
+                    print(f"\n\033[91m[!] TAMPER MODE: Modifying ciphertext bytes to attack integrity...")
                     mutated_payload = bytearray(payload)
                     if length > 0:
                         mutated_payload[0] ^= 0xFF
-                    print("[!] Flipping one ciphertext byte (no way to fix tag/HMAC without the keys)...\n")
+                    print(f"  ├── Mutator: Modified byte offset 0 in ciphertext block.")
+                    print(f"  └── Structure Pack: Forwarding corrupted {PACKET_SIZE}-byte frame to Node B.\033[0m\n")
                     raw_packet = struct.pack(PACKET_FORMAT, magic, ptype, src_id, dest_id,
                                               length, seq, timestamp, nonce, salt, tag,
                                               bytes(mutated_payload))
@@ -126,57 +123,78 @@ class SecureMitmOrchestrator:
 
                 if self.mode == "replay" and self.replay_cache:
                     time.sleep(2)
-                    print("\033[33m[!] REPLAY ATTACK: Re-injecting a previously-seen encrypted frame...\033[0m")
+                    print("\n\033[33m[!] REPLAY ATTACK EXECUTION: Re-injecting historical state frame...")
                     try:
                         os.write(fd_out, self.replay_cache[0])
-                        print("    Sent duplicate frame — watch the receiver reject it as a replay.\n")
+                        print("    └── [SUCCESS] Duplicate sequence packet pushed to Node B.\033[0m\n")
                     except BrokenPipeError:
-                        print("    [FAILURE] Broken pipe — receiver not running.\n")
+                        print("    └── [❌ FAILURE] Broken Pipe! Node B exited early or didn't run in a loop.\033[0m\n")
                     self.replay_cache.clear()
 
             except KeyboardInterrupt:
-                print("\n[*] Intercept routine terminated.")
+                print("\n[*] Intercept routine terminated cleanly by user.")
                 break
             except Exception as e:
-                print(f"[-] Runtime error: {e}")
-                break
+                print(f"[-] Runtime processing error encountered: {e}")
+                time.sleep(1)
 
-        os.close(fd_in)
-        os.close(fd_out)
+        try:
+            os.close(fd_in)
+            os.close(fd_out)
+        except Exception:
+            pass
 
     def execute_standalone_injection(self):
-        """ATTACK CLASS 4: forged packet injection — no sender involved at all."""
-        print("[*] Forged Packet Injection vs HARDENED protocol...")
-        print("[*] Attacker does not know session_key or hmac_key.\n")
+        """ATTACK CLASS 4: forged packet injection."""
+        self.ensure_pipes_exist()
 
-        if not os.path.exists(PIPE_OUT):
-            os.mkfifo(PIPE_OUT)
-        fd_out = os.open(PIPE_OUT, os.O_WRONLY)
+        print(f"[*] Initializing Forged Packet Injection Engine vs HARDENED protocol...")
+        print(f"[*] Bypassing Node A entirely. Establishing target channel access link...")
 
-        fake_msg = self.inject_msg.encode("utf-8", errors="ignore")
-        fake_len = len(fake_msg)
-        fake_payload = fake_msg.ljust(256, b"\x00")   # NOT real ciphertext — attacker has no key
-        fake_nonce = os.urandom(12)
-        fake_salt = os.urandom(16)                     # attacker can't compute the real HMAC
-        fake_tag = os.urandom(16)                       # attacker can't compute the real GCM tag
+        try:
+            fd_out = os.open(PIPE_OUT, os.O_WRONLY)
 
-        packet = struct.pack(PACKET_FORMAT, 0xABCD1234, 1, 1, 2, fake_len, 1337, 0,
-                              fake_nonce, fake_salt, fake_tag, fake_payload)
+            fake_msg = self.inject_msg.encode("utf-8", errors="ignore")
+            fake_len = len(fake_msg)
+            fake_payload = fake_msg.ljust(256, b"\x00")
+            fake_nonce = os.urandom(12)
+            fake_salt = os.urandom(16)
+            fake_tag = os.urandom(16)
 
-        print("\033[95m" + "!" * 60)
-        print(f"[PACKET FORGERY DISPATCHED] \"{self.inject_msg}\"")
-        print(f"  Magic header matches, but tag/HMAC are guesses — no key access.")
-        print("!" * 60 + "\033[0m\n")
+            packet = struct.pack(PACKET_FORMAT, 0xABCD1234, 1, 1, 2, fake_len, 1337, 0,
+                                  fake_nonce, fake_salt, fake_tag, fake_payload)
 
-        os.write(fd_out, packet)
-        os.close(fd_out)
+            print("\n\033[95m" + "!" * 60)
+            print(f"[PACKET FORGERY DISPATCHED] Sending Unauthorized Structural Payload")
+            print(f"  ├── Forged Message Body : \"{self.inject_msg}\"")
+            print(f"  └── Total Outflow Frame : {len(packet)} Bytes Packed")
+            print("!" * 60 + "\033[0m\n")
+
+            os.write(fd_out, packet)
+            os.close(fd_out)
+
+        except Exception as e:
+            print(f"[-] Critical injection processing crash occurred: {e}")
+
+        # Keep process alive forever in terminal after injection
+        print("[*] Injection loop complete. Terminal remaining open/active. Press Ctrl+C to terminate.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[*] Orchestrator exited.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="IITI SOC 2026 Track 3 - Secure Protocol Attack Verification")
+    parser = argparse.ArgumentParser(description="IITI SOC 2026 Track 3 Cyber Engine (Hardened)")
     parser.add_argument("--mode", choices=["sniff", "tamper", "replay", "inject"], required=True)
     parser.add_argument("--message", type=str, default="FORGED COMMAND FROM ATTACKER",
-                         help="Payload for standalone injection attempts.")
+                        help="Data block payload for injection runs.")
     args = parser.parse_args()
+
     engine = SecureMitmOrchestrator(mode=args.mode, inject_msg=args.message)
-    engine.run()
+    
+    try:
+        engine.run()
+    except KeyboardInterrupt:
+        print("\n[*] Intercept engine closed.")
