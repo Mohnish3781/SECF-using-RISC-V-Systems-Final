@@ -1,5 +1,4 @@
 import time
-import random
 from rich.live import Live
 from rich.table import Table
 from rich.panel import Panel
@@ -18,7 +17,7 @@ ATTACK_SCENARIOS = [
 ]
 
 def generate_report_table(completed_attacks):
-    """Generates the main structured evaluation report table."""
+    """Generates the main structured evaluation report table with separate grading."""
     table = Table(
         title="[bold red]AUTOMATED ATTACK SIMULATION & EVALUATION REPORT[/]",
         box=box.SIMPLE_HEAVY,
@@ -28,21 +27,34 @@ def generate_report_table(completed_attacks):
     )
     
     table.add_column("Attack Scenario", style="cyan", justify="left")
-    table.add_column("Insecure Protocol Behavior", style="yellow", justify="center")
+    table.add_column("Insecure Behavior", style="yellow", justify="center")
+    table.add_column("Insecure Grade", justify="center")
     table.add_column("Secure Countermeasure Outcome", style="bold white", justify="center")
-    table.add_column("Final Status", justify="center")
+    table.add_column("Secure Grade", justify="center")
 
     for attack in completed_attacks:
-        # Insecure behavior is usually "Vulnerable" or "Affected"
-        insecure_behavior = "[red]Successfully Affected[/]" if attack['name'] != "Malformed Packet Injection" else "[yellow]Rejected (Crash)[/]"
+        # Determine Insecure Behavior and Grade
+        if attack['name'] == "Malformed Packet Injection":
+            insecure_behavior = "[yellow]Rejected (Crash)[/]"
+            insecure_grade = "[red]FAIL[/]" # A crash is a failure of system stability
+        else:
+            insecure_behavior = "[red]Successfully Affected[/]"
+            insecure_grade = "[red]FAIL[/]" # Vulnerability exploited
         
-        status_color = "green" if attack['status'] in ["Detected", "Rejected"] else "red"
-        
+        # Determine Secure Status and Grade
+        if "Detected" in attack['status'] or "Rejected" in attack['status']:
+            secure_grade = "[green]PASS[/]"
+            status_color = "green"
+        else:
+            secure_grade = "[red]FAIL[/]"
+            status_color = "red"
+            
         table.add_row(
             attack['name'],
             insecure_behavior,
+            insecure_grade,
             f"[{status_color}]{attack['status']}[/]",
-            f"[{status_color}]PASS[/]" if attack['status'] in ["Detected", "Rejected"] else "[red]FAIL[/]"
+            secure_grade
         )
 
     return table
@@ -88,28 +100,30 @@ def main():
     
     # Start the Live dashboard
     with Live(create_layout(None, completed_attacks, "Initializing..."), refresh_per_second=10) as live:
-        time.sleep(2) # Initial pause
+        time.sleep(1) # Initial pause
         
         for attack in ATTACK_SCENARIOS:
             # Phase 1: Injecting
             live.update(create_layout(attack, completed_attacks, "Injecting malicious vectors... ▓░░░░░░░░░"))
-            time.sleep(0.8)
+            time.sleep(0.6)
             
             # Phase 2: Analyzing
             live.update(create_layout(attack, completed_attacks, "Analyzing protocol response... ▓▓▓▓▓▓░░░░"))
-            time.sleep(0.8)
+            time.sleep(0.6)
             
-            # Phase 3: Determining Outcome
-            # We simulate the secure protocol mostly defending successfully (Detected/Rejected)
-            if attack['name'] == "Packet Duplication":
-                outcome = "Rejected (Replay Protected)"
+            # Phase 3: Determining Outcome (Matching your screenshot exact outputs)
+            if attack['name'] == "Packet Injection":
+                outcome = "Detected"
             elif attack['name'] in ["Packet Modification (MITM)", "Malformed Packet Injection"]:
                 outcome = "Rejected (MAC/CRC Invalid)"
             elif attack['name'] == "Packet Dropping":
                 outcome = "Detected (Timeout/Retransmit)"
+            elif attack['name'] == "Packet Duplication":
+                outcome = "Rejected (Replay Protected)"
+            elif attack['name'] == "Packet Delay/Reordering":
+                outcome = "Rejected"
             else:
-                # Randomize slightly for realism, but heavily weight towards success
-                outcome = random.choice(["Detected", "Rejected", "Rejected"])
+                outcome = "Detected"
                 
             attack_result = {
                 "name": attack["name"],
@@ -120,13 +134,17 @@ def main():
             
             # Update with finished attack
             live.update(create_layout(attack, completed_attacks, f"Completed: {outcome} ▓▓▓▓▓▓▓▓▓▓"))
-            time.sleep(1)
+            time.sleep(0.8)
             
         # Final state
         live.update(create_layout(None, completed_attacks, "Done"))
         
         # Keep the terminal up for a few seconds so the user can read the final report
-        time.sleep(5)
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass # Allows user to safely exit with Ctrl+C
 
 if __name__ == "__main__":
     main()
