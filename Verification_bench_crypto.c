@@ -1,124 +1,105 @@
-#!/usr/bin/env python3
-import time
-import random
-from rich.live import Live
-from rich.table import Table
-from rich.layout import Layout
-from rich.panel import Panel
-from rich.text import Text
-from rich import box
-from rich.console import Console
+/* =====================================================
+   bench_crypto.c (OPTIMIZED FOR ULTRA-LOW LATENCY)
+   IITI SOC 2026 - PS8
+   - Uses AES-256-GCM
+   - Context Reuse (Eradicates malloc() inside loops)
+   ===================================================== */
 
-# --- Global state variables for live simulation ---
-sequence_num = 6800
-latency_hard = 0.0042
-throughput_base = 125000
-throughput_hard = 105000
-pdr_hard = 100.00
-retrans_count = 0
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <time.h>
+#include <math.h>
 
-def generate_dashboard() -> Layout:
-    """Generates the current frame of the dashboard layout satisfying Ideal Targets."""
-    global sequence_num, latency_hard, throughput_base, throughput_hard, pdr_hard, retrans_count
+#include <openssl/evp.h>
+#include <openssl/rand.h>
 
-    # 1. Simulate data changing within Ideal Target parameters
-    sequence_num += random.randint(10, 50)
-    latency_hard = random.uniform(0.0040, 0.0049)      # Target: < 0.0050 ms
-    throughput_base = random.randint(124000, 126000) 
-    throughput_hard = random.randint(105000, 110000)   # Target: > 100,000 FPS
-    pdr_hard = 100.00                                  # Target: 100.00%
-    retrans_count = 0                                  # Target: 0
+#define AES_KEY_SIZE 32   // AES-256
+#define IV_SIZE 12        // GCM Recommended IV size
+#define TAG_SIZE 16       // GCM Auth Tag
+#define PAYLOAD_SIZE 256
+
+#define NUM_PACKETS_LATENCY 1000
+#define NUM_PACKETS_THROUGHPUT 100000
+
+static uint8_t session_key[AES_KEY_SIZE];
+static uint8_t iv[IV_SIZE];
+
+/* Pre-allocate Context (Crucial for <5us latency) */
+EVP_CIPHER_CTX *global_ctx;
+
+static void setup_crypto() {
+    RAND_bytes(session_key, AES_KEY_SIZE);
+    RAND_bytes(iv, IV_SIZE);
+    global_ctx = EVP_CIPHER_CTX_new();
+}
+
+static void cleanup_crypto() {
+    EVP_CIPHER_CTX_free(global_ctx);
+}
+
+static double now_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1e6 + ts.tv_nsec / 1e3;
+}
+
+/* Highly Optimized AES-GCM Encrypt using global_ctx */
+static int aes_gcm_encrypt_optimized(uint8_t *pt, int pt_len, uint8_t *ct, uint8_t *tag) {
+    int len = 0, ct_len = 0;
     
-    # Generate fake live ciphertext
-    hex_bytes = " ".join(f"{random.randint(0, 255):02X}" for _ in range(24)) + "..."
-
-    # 2. Define the main layout grid
-    layout = Layout()
-    layout.split_column(
-        Layout(name="header", size=3),
-        Layout(name="nodes", size=7),
-        Layout(name="profiling"),
-        Layout(name="footer", size=3)
-    )
-    layout["nodes"].split_row(
-        Layout(name="node_a"),
-        Layout(name="node_b")
-    )
-
-    # 3. Header Panel
-    layout["header"].update(Panel(
-        Text("🔒 SECURE EMBEDDED COMMUNICATION DASHBOARD 🔒", justify="center", style="bold white"), 
-        border_style="magenta"
-    ))
-
-    # 4. Node A Panel (Sender)
-    node_a_text = Text()
-    node_a_text.append("Node State:\t\t", style="white")
-    node_a_text.append("TRANSMITTING\n", style="bold cyan")
-    node_a_text.append("Encryption:\t\t", style="white")
-    node_a_text.append("AES-256-GCM ACTIVE\n", style="bold green")
-    node_a_text.append("Current Sequence:\t", style="white")
-    node_a_text.append(f"{sequence_num}", style="bold yellow")
+    // Reuse context, only reset IV and Key
+    EVP_EncryptInit_ex(global_ctx, EVP_aes_256_gcm(), NULL, session_key, iv);
+    EVP_EncryptUpdate(global_ctx, ct, &len, pt, pt_len);
+    ct_len = len;
     
-    layout["node_a"].update(Panel(
-        node_a_text, 
-        title="📡 NODE A (SENDER)", 
-        border_style="magenta", 
-        title_align="left"
-    ))
-
-    # 5. Node B Panel (Receiver)
-    node_b_text = Text()
-    node_b_text.append("Node State:\t\t", style="white")
-    node_b_text.append("LISTENING\n", style="bold cyan")
-    node_b_text.append("MAC Verification:\t", style="white")
-    node_b_text.append("✅ VALID\n", style="bold green")
-    node_b_text.append("Replay Protection:\t", style="white")
-    node_b_text.append("✅ SEQ ACCEPTED", style="bold green")
+    EVP_EncryptFinal_ex(global_ctx, ct + len, &len);
+    ct_len += len;
     
-    layout["node_b"].update(Panel(
-        node_b_text, 
-        title="📡 NODE B (RECEIVER)", 
-        border_style="magenta", 
-        title_align="left"
-    ))
+    // Extract Authentication Tag
+    EVP_CIPHER_CTX_ctrl(global_ctx, EVP_CTRL_GCM_GET_TAG, TAG_SIZE, tag);
+    return ct_len;
+}
 
-    # 6. Profiling Table
-    table = Table(box=box.SIMPLE_HEAVY, expand=True, border_style="magenta")
-    table.add_column("Performance Metric", style="bold white", width=35)
-    table.add_column("Insecure Baseline", justify="center", style="bold white")
-    table.add_column("Secure Hardened (Active)", justify="center", style="bold white")
-
-    # Hardcoded text parameters target the requirements precisely
-    table.add_row("Connection Establishment Time", "1.2 ms", "1.8 ms") # < 2.0 ms
-    table.add_row("End-to-End Latency", "0.0035 ms", f"{latency_hard:.4f} ms")
-    table.add_row("Throughput", f"{throughput_base:,} FPS", f"{throughput_hard:,} FPS")
-    table.add_row("Packet Delivery Ratio (PDR)", "100.00%", f"{pdr_hard:.2f}%")
-    table.add_row("Retransmission Count", "0", f"{retrans_count}")
-    table.add_row("Protocol Overhead", "0%", "[bold green]+18%[/bold green]") # < +25%
-
-    layout["profiling"].update(Panel(
-        table, 
-        title="📊 LIVE COMMUNICATION PERFORMANCE PROFILING (OPTIMIZED)", 
-        border_style="magenta"
-    ))
-
-    # 7. Footer Panel (Ciphertext Intercept)
-    layout["footer"].update(Panel(
-        f"Live Ciphertext Intercept: [bold white]{hex_bytes}[/bold white]", 
-        border_style="magenta"
-    ))
-
-    return layout
-
-if __name__ == "__main__":
-    console = Console()
-    console.clear()
+int main(void) {
+    uint8_t plaintext[PAYLOAD_SIZE], ciphertext[PAYLOAD_SIZE + 16]; 
+    uint8_t tag[TAG_SIZE];
+    RAND_bytes(plaintext, PAYLOAD_SIZE);
     
-    try:
-        with Live(generate_dashboard(), refresh_per_second=10, screen=True) as live:
-            while True:
-                time.sleep(0.1)
-                live.update(generate_dashboard())
-    except KeyboardInterrupt:
-        console.print("[bold red]Dashboard terminated by user.[/bold red]")
+    setup_crypto();
+
+    /* ---------- LATENCY MEASUREMENT ---------- */
+    double lat_hard[NUM_PACKETS_LATENCY];
+    double total_hard = 0;
+
+    for (int i = 0; i < NUM_PACKETS_LATENCY; i++) {
+        double t0 = now_us();
+        aes_gcm_encrypt_optimized(plaintext, PAYLOAD_SIZE, ciphertext, tag);
+        double t1 = now_us();
+        lat_hard[i] = t1 - t0;
+        total_hard += lat_hard[i];
+    }
+    double mean_latency = total_hard / NUM_PACKETS_LATENCY;
+
+    /* ---------- THROUGHPUT MEASUREMENT ---------- */
+    double t0 = now_us();
+    for (int i = 0; i < NUM_PACKETS_THROUGHPUT; i++) {
+        aes_gcm_encrypt_optimized(plaintext, PAYLOAD_SIZE, ciphertext, tag);
+    }
+    double t1 = now_us();
+    
+    double hard_time_sec = (t1 - t0) / 1e6;
+    double hard_fps = NUM_PACKETS_THROUGHPUT / hard_time_sec;
+
+    /* ---------- OUTPUT ---------- */
+    printf("{\n");
+    printf("  \"metric_status\": \"OPTIMIZED\",\n");
+    printf("  \"mean_latency_us\": %.4f,\n", mean_latency);
+    printf("  \"mean_latency_ms\": %.6f,\n", mean_latency / 1000.0);
+    printf("  \"throughput_fps\": %.0f\n", hard_fps);
+    printf("}\n");
+
+    cleanup_crypto();
+    return 0;
+}
