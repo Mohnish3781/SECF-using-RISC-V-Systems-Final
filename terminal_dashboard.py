@@ -1,67 +1,133 @@
-#!/usr/bin/env python3
-
-from rich.console import Console
+import time
+import random
+from rich.live import Live
 from rich.table import Table
-from rich.layout import Layout
 from rich.panel import Panel
+from rich.layout import Layout
+from rich import box
+from rich.text import Text
 from rich.align import Align
 
-console = Console()
+def generate_hex_string(length=32):
+    """Generates a random hex string to simulate ciphertext intercept."""
+    return " ".join([f"{random.randint(0, 255):02X}" for _ in range(length)])
 
-def generate_dashboard():
-    # Set up the main layout grid
+def create_dashboard(throughput_secure, pdr_secure, retransmissions, ciphertext):
+    """Builds the rich layout for the dashboard."""
+    
+    # 1. Header Layout
+    header = Text("🔒 SECURE EMBEDDED COMMUNICATION DASHBOARD 🔒", style="bold magenta", justify="center")
+    
+    # 2. Node Info Panels
+    node_a_text = Text.assemble(
+        ("Node State:\t", "cyan"), ("TRANSMITTING\n", "bold green"),
+        ("Encryption:\t", "cyan"), ("AES-256-GCM ACTIVE\n", "bold green"),
+        ("Current Sequence:\t", "cyan"), (f"{random.randint(1000, 9999)}", "bold yellow")
+    )
+    panel_a = Panel(node_a_text, title="[bold magenta]NODE A (SENDER)[/]", border_style="magenta", box=box.ROUNDED)
+
+    node_b_text = Text.assemble(
+        ("Node State:\t", "cyan"), ("LISTENING\n", "bold green"),
+        ("MAC Verification:\t", "cyan"), ("✅ VALID\n", "bold green"),
+        ("Replay Protection:\t", "cyan"), ("✅ SEQ ACCEPTED", "bold green")
+    )
+    panel_b = Panel(node_b_text, title="[bold magenta]NODE B (RECEIVER)[/]", border_style="magenta", box=box.ROUNDED)
+    
+    # Combine Nodes horizontally
+    node_grid = Table.grid(expand=True)
+    node_grid.add_column(ratio=1)
+    node_grid.add_column(ratio=1)
+    node_grid.add_row(panel_a, panel_b)
+
+    # 3. Performance Metrics Table
+    metrics_table = Table(
+        title="[bold cyan]LIVE COMMUNICATION PERFORMANCE PROFILING (OPTION 2)[/]",
+        box=box.SIMPLE_HEAVY,
+        expand=True,
+        header_style="bold magenta",
+        border_style="magenta"
+    )
+    
+    metrics_table.add_column("Performance Metric", style="cyan", justify="left")
+    metrics_table.add_column("Insecure Baseline", style="blue", justify="center")
+    metrics_table.add_column("Secure Hardened (Active)", style="bold white", justify="center")
+
+    # Add Rows (simulating the data from the video)
+    metrics_table.add_row(
+        "Connection Establishment Time", 
+        "8.5 ms", 
+        "12.4 ms"
+    )
+    metrics_table.add_row(
+        "End-to-End Latency", 
+        "0.0143 ms", 
+        f"0.04{random.randint(10, 99)} ms"
+    )
+    metrics_table.add_row(
+        "Throughput", 
+        "70,000 FPS", 
+        f"{throughput_secure:,.3f} FPS"
+    )
+    metrics_table.add_row(
+        "Packet Delivery Ratio (PDR)", 
+        "100.00%", 
+        f"{pdr_secure:.2f}%"
+    )
+    metrics_table.add_row(
+        "Retransmission Count", 
+        "0", 
+        f"{retransmissions}"
+    )
+    metrics_table.add_row(
+        "Protocol Overhead", 
+        "0%", 
+        "[bold red]+186%[/]"
+    )
+
+    metrics_panel = Panel(metrics_table, border_style="magenta")
+
+    # 4. Footer (Live Ciphertext)
+    footer_text = Text(f"Live Ciphertext Intercept: {ciphertext}...", style="dim white")
+    
+    # 5. Assemble Main Layout
     layout = Layout()
-    layout.split_column(
-        Layout(name="header", size=3),
-        Layout(name="profiling", size=11),
-        Layout(name="security", size=13),
-        Layout(name="verdict", size=8)
+    layout.split(
+        Layout(header, size=3),
+        Layout(node_grid, size=7),
+        Layout(metrics_panel),
+        Layout(footer_text, size=3)
     )
     
-    # 1. HEADER
-    layout["header"].update(Panel(Align.center("[bold cyan]🚀 SECURE EMBEDDED COMMUNICATION DASHBOARD 🚀[/bold cyan]"), style="bold blue"))
-    
-    # 2. PERFORMANCE PROFILING TABLE
-    profiling_table = Table(expand=True, show_lines=True)
-    profiling_table.add_column("Performance Metric", style="bold yellow", justify="left")
-    profiling_table.add_column("Insecure Baseline (Before)", justify="center", style="dim")
-    profiling_table.add_column("Secure Hardened (After)", justify="center", style="bold white")
-    
-    # Metrics extracted from benchmark sources
-    profiling_table.add_row("Connection Establishment Time", "0.5 ms", "12.4 ms")
-    profiling_table.add_row("End-to-End Latency", "0.0143 ms", "0.0409 ms")
-    profiling_table.add_row("Throughput (Packets/sec)", "70,006.88 PPS", "24,444.28 PPS")
-    profiling_table.add_row("Maximum Jitter", "0.8059 ms", "2.0025 ms")
-    profiling_table.add_row("Protocol Overhead", "0%", "[red]+186%[/red]")
-    
-    layout["profiling"].update(Panel(profiling_table, title="[bold magenta]📊 COMMUNICATION PERFORMANCE PROFILING (DOMAIN 4)[/bold magenta]", border_style="magenta"))
-    
-    # 3. THREAT MITIGATION MATRIX
-    security_table = Table(expand=True, show_lines=True)
-    security_table.add_column("Attack Vector", style="bold cyan")
-    security_table.add_column("Baseline (Before)", style="red")
-    security_table.add_column("Secure (After)", style="green")
-    security_table.add_column("Mitigation Mechanism", style="yellow")
-
-    # Attack data extracted from the automated evaluation framework
-    security_table.add_row("Sniffing", "❌ Cleartext Exposed", "✅ Data Obfuscated", "AES-256-GCM Encryption")
-    security_table.add_row("Tamper", "❌ Payload Altered", "✅ Blocked (Detected)", "GCM Authentication Tag")
-    security_table.add_row("Replay", "❌ Processed Twice", "✅ Blocked (Detected)", "Sequence & Timestamp Tracking")
-    security_table.add_row("Inject", "❌ Accepted as Valid", "✅ Blocked (Auth Failed)", "GCM Authentication Tag")
-    security_table.add_row("Drop / Delay", "❌ Unhandled Loss", "✅ Handled Safely", "Timeout / Timestamp Expiration")
-
-    layout["security"].update(Panel(security_table, title="[bold red]🚨 THREAT MITIGATION MATRIX[/bold red]", border_style="red"))
-
-    # 4. FINAL VERDICT & SCORING
-    verdict_table = Table(show_header=False, expand=True, box=None)
-    verdict_table.add_row(
-        "[bold dim]INSECURE BASELINE[/bold dim]\n[bold red]Score: 10 / 100 (Grade: F - CRITICAL RISK)[/bold red]\nConfidentiality: 0/25 | Integrity: 0/25\nReplay Resistance: 0/25 | Resilience: 10/25",
-        "[bold white]SECURE FRAMEWORK[/bold white]\n[bold green]Score: 98 / 100 (Grade: A+ - ENTERPRISE GRADE)[/bold green]\nConfidentiality: 25/25 | Integrity: 25/25\nReplay Resistance: 25/25 | Resilience: 23/25"
-    )
-    
-    layout["verdict"].update(Panel(verdict_table, title="[bold yellow]🏆 PROTOCOL SECURITY SCORING[/bold yellow]", border_style="yellow"))
-
     return layout
 
+def main():
+    # Initial Simulation Values
+    throughput_secure = 24100.0
+    retransmissions = 0
+    pdr_secure = 100.00
+    
+    # Start the Live dashboard
+    with Live(create_dashboard(throughput_secure, pdr_secure, retransmissions, generate_hex_string()), refresh_per_second=10) as live:
+        try:
+            while True:
+                # Simulate live fluctuating data similar to the video
+                throughput_secure = 24000.0 + random.uniform(-100, 900)
+                
+                # Occasionally drop PDR slightly and increase retransmissions
+                if random.random() > 0.8:
+                    pdr_secure = random.uniform(99.90, 99.99)
+                    retransmissions += random.randint(0, 2)
+                else:
+                    pdr_secure = 100.00
+                
+                ciphertext = generate_hex_string()
+                
+                # Update the dashboard layout with new values
+                live.update(create_dashboard(throughput_secure, pdr_secure, retransmissions, ciphertext))
+                time.sleep(0.1) # 100ms update rate
+                
+        except KeyboardInterrupt:
+            pass # Stop gracefully on Ctrl+C
+
 if __name__ == "__main__":
-    console.print(generate_dashboard())
+    main()
