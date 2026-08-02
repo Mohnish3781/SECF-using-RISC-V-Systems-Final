@@ -3,20 +3,7 @@
    IITI SOC 2026 - PS8: Real (non-simulated) performance benchmark
    Member 4: Protocol Hardening & Performance Engineering
 
-   Times the ACTUAL cryptographic primitives used by the hardened
-   sender/receiver (AES-256-GCM encrypt, HMAC-SHA256, sequence check)
-   using clock_gettime(CLOCK_MONOTONIC), and compares against a
-   baseline (no-crypto, memcpy-only) path.
-
-   Prints a single JSON object to stdout with the same schema as the
-   original benchmarking_suite.py so downstream report/graph code
-   doesn't need to change.
-
-   COMPILE:
-     gcc -O2 -o bench_crypto bench_crypto.c -lssl -lcrypto -lm
-
-   RUN:
-     ./bench_crypto > benchmark_results.json
+   Outputs purely JSON for the wrapper script to format into tables.
    ===================================================== */
 
 #include <stdio.h>
@@ -39,8 +26,6 @@
 
 #define NUM_PACKETS_LATENCY 100
 #define NUM_PACKETS_THROUGHPUT 1000
-#define NUM_ITER_OVERHEAD 1000
-#define NUM_ITER_SEQ 100000
 
 static uint8_t session_key[AES_KEY_SIZE] = {
     0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
@@ -120,13 +105,13 @@ int main(void) {
     RAND_bytes(nonce, NONCE_SIZE);
     RAND_bytes(aad, AAD_SIZE);
 
-    /* ---------- LATENCY: baseline (memcpy) vs hardened (AES-GCM+HMAC) ---------- */
+    /* ---------- LATENCY ---------- */
     double lat_base[NUM_PACKETS_LATENCY], lat_hard[NUM_PACKETS_LATENCY];
     uint8_t scratch[PAYLOAD_SIZE];
 
     for (int i = 0; i < NUM_PACKETS_LATENCY; i++) {
         double t0 = now_us();
-        memcpy(scratch, plaintext, PAYLOAD_SIZE);      /* baseline: no crypto */
+        memcpy(scratch, plaintext, PAYLOAD_SIZE);
         double t1 = now_us();
         lat_base[i] = t1 - t0;
     }
@@ -141,6 +126,7 @@ int main(void) {
         double t1 = now_us();
         lat_hard[i] = t1 - t0;
     }
+    
     Stats sb = compute_stats(lat_base, NUM_PACKETS_LATENCY);
     Stats sh = compute_stats(lat_hard, NUM_PACKETS_LATENCY);
     double latency_overhead_pct = (sh.mean - sb.mean) / sb.mean * 100.0;
@@ -151,7 +137,6 @@ int main(void) {
     double t1 = now_us();
     double base_time_sec = (t1 - t0) / 1e6;
     double base_pps = NUM_PACKETS_THROUGHPUT / base_time_sec;
-    double base_mbps = (NUM_PACKETS_THROUGHPUT * PAYLOAD_SIZE * 8 / 1e6) / base_time_sec;
 
     t0 = now_us();
     for (int i = 0; i < NUM_PACKETS_THROUGHPUT; i++) {
@@ -165,68 +150,17 @@ int main(void) {
     t1 = now_us();
     double hard_time_sec = (t1 - t0) / 1e6;
     double hard_pps = NUM_PACKETS_THROUGHPUT / hard_time_sec;
-    double hard_mbps = (NUM_PACKETS_THROUGHPUT * PAYLOAD_SIZE * 8 / 1e6) / hard_time_sec;
-    double throughput_reduction_pct = (base_pps - hard_pps) / base_pps * 100.0;
-
-    /* ---------- PER-MECHANISM OVERHEAD ---------- */
-    double aes_times[NUM_ITER_OVERHEAD], hmac_times[NUM_ITER_OVERHEAD];
-    for (int i = 0; i < NUM_ITER_OVERHEAD; i++) {
-        double a = now_us();
-        aes_gcm_encrypt(plaintext, PAYLOAD_SIZE, aad, AAD_SIZE, nonce, ciphertext, tag);
-        aes_times[i] = now_us() - a;
-    }
-    for (int i = 0; i < NUM_ITER_OVERHEAD; i++) {
-        uint8_t hmac_in[AAD_SIZE + TAG_SIZE + PAYLOAD_SIZE];
-        memcpy(hmac_in, aad, AAD_SIZE);
-        memcpy(hmac_in + AAD_SIZE, tag, TAG_SIZE);
-        memcpy(hmac_in + AAD_SIZE + TAG_SIZE, ciphertext, PAYLOAD_SIZE);
-        double a = now_us();
-        hmac_sha256(hmac_in, sizeof(hmac_in), hmac_out);
-        hmac_times[i] = now_us() - a;
-    }
-    /* sequence counter check: O(1) array compare, matches receiver logic scale.
-       Heap-allocated: 100k doubles (~800KB) would risk stack overflow. */
-    double *seq_times = malloc(NUM_ITER_SEQ * sizeof(double));
-    uint32_t window[1000]; int widx = 0;
-    for (int i = 0; i < NUM_ITER_SEQ; i++) {
-        double a = now_us();
-        int found = 0;
-        for (int j = 0; j < widx; j++) if (window[j] == (uint32_t)i) { found = 1; break; }
-        if (!found && widx < 1000) window[widx++] = (uint32_t)i;
-        seq_times[i] = now_us() - a;
-    }
-    Stats aes_s = compute_stats(aes_times, NUM_ITER_OVERHEAD);
-    Stats hmac_s = compute_stats(hmac_times, NUM_ITER_OVERHEAD);
-    Stats seq_s = compute_stats(seq_times, NUM_ITER_SEQ);
-    free(seq_times);
-    double total_crypto_overhead_us = aes_s.mean + hmac_s.mean;
 
     /* ---------- OUTPUT JSON ---------- */
     printf("{\n");
-    printf("  \"methodology\": \"real measurements via clock_gettime(CLOCK_MONOTONIC) around actual OpenSSL AES-256-GCM and HMAC-SHA256 calls, not simulated\",\n");
-    printf("  \"payload_size_bytes\": %d,\n", PAYLOAD_SIZE);
     printf("  \"latency\": {\n");
-    printf("    \"baseline\": {\"min_us\": %.4f, \"max_us\": %.4f, \"mean_us\": %.4f, \"median_us\": %.4f, \"stdev_us\": %.4f, \"p95_us\": %.4f, \"p99_us\": %.4f},\n",
-           sb.min, sb.max, sb.mean, sb.median, sb.stdev, sb.p95, sb.p99);
-    printf("    \"hardened\": {\"min_us\": %.4f, \"max_us\": %.4f, \"mean_us\": %.4f, \"median_us\": %.4f, \"stdev_us\": %.4f, \"p95_us\": %.4f, \"p99_us\": %.4f},\n",
-           sh.min, sh.max, sh.mean, sh.median, sh.stdev, sh.p95, sh.p99);
+    printf("    \"baseline\": {\"mean_us\": %.4f},\n", sb.mean);
+    printf("    \"hardened\": {\"mean_us\": %.4f},\n", sh.mean);
     printf("    \"overhead_percent\": %.4f\n", latency_overhead_pct);
     printf("  },\n");
     printf("  \"throughput\": {\n");
-    printf("    \"baseline\": {\"packets_per_second\": %.4f, \"mbps\": %.4f, \"total_time_sec\": %.6f},\n",
-           base_pps, base_mbps, base_time_sec);
-    printf("    \"hardened\": {\"packets_per_second\": %.4f, \"mbps\": %.4f, \"total_time_sec\": %.6f},\n",
-           hard_pps, hard_mbps, hard_time_sec);
-    printf("    \"reduction_percent\": %.4f\n", throughput_reduction_pct);
-    printf("  },\n");
-    printf("  \"overhead\": {\n");
-    printf("    \"aes\": {\"mechanism\": \"AES-256-GCM Encryption\", \"avg_time_us\": %.4f, \"min_time_us\": %.4f, \"max_time_us\": %.4f},\n",
-           aes_s.mean, aes_s.min, aes_s.max);
-    printf("    \"hmac\": {\"mechanism\": \"HMAC-SHA256 Verification\", \"avg_time_us\": %.4f, \"min_time_us\": %.4f, \"max_time_us\": %.4f},\n",
-           hmac_s.mean, hmac_s.min, hmac_s.max);
-    printf("    \"sequence\": {\"mechanism\": \"Sequence Counter Validation\", \"avg_time_us\": %.4f, \"min_time_us\": %.4f, \"max_time_us\": %.4f},\n",
-           seq_s.mean, seq_s.min, seq_s.max);
-    printf("    \"total_crypto_overhead_us\": %.4f\n", total_crypto_overhead_us);
+    printf("    \"baseline\": {\"packets_per_second\": %.4f, \"total_time_sec\": %.6f},\n", base_pps, base_time_sec);
+    printf("    \"hardened\": {\"packets_per_second\": %.4f, \"total_time_sec\": %.6f}\n", hard_pps, hard_time_sec);
     printf("  },\n");
     printf("  \"jitter\": {\n");
     printf("    \"baseline_stdev_us\": %.4f,\n", sb.stdev);
