@@ -2,6 +2,12 @@
 """
 IITI SOC 2026 - PS8: Secure Embedded Communication Framework
 BENCHMARKING SUITE - Protocol Hardening & Performance Engineering
+Author: Abhinay Rathod (Member 4)
+Purpose: Measure latency, throughput, jitter for baseline vs hardened protocol
+
+METHODOLOGY NOTE:
+This script complies and runs bench_crypto.c, timing the ACTUAL OpenSSL 
+AES-128-CBC, CRC-32, and HMAC-SHA256 calls used by the hardened sender/receiver.
 """
 
 import os
@@ -13,19 +19,23 @@ from datetime import datetime
 BENCH_C_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench_crypto.c")
 BENCH_BINARY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench_crypto")
 
-NUM_PACKETS_THROUGHPUT = 1000
-
 def compile_bench_crypto():
     """Compile bench_crypto.c (requires gcc + OpenSSL dev headers)."""
+    print("[*] Compiling bench_crypto.c (real AES-128-CBC / CRC-32 / HMAC-SHA256 timing harness)...")
     cmd = ["gcc", "-O2", "-o", BENCH_BINARY, BENCH_C_SOURCE, "-lssl", "-lcrypto", "-lm"]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print("[-] Compilation failed:")
         print(result.stderr)
+        print("\n[!] Make sure OpenSSL dev headers are installed:")
+        print("    sudo apt install -y build-essential libssl-dev   (on WSL/Ubuntu)")
         sys.exit(1)
+    print("[+] Compiled successfully.\n")
 
 def run_bench_crypto():
     """Run the compiled benchmark binary and parse its JSON output."""
+    print("[*] Running real benchmark (100 latency samples, 1000 throughput packets,")
+    print("    1000 AES/HMAC/CRC overhead iterations, 100000 sequence-check iterations)...\n")
     result = subprocess.run([BENCH_BINARY], capture_output=True, text=True)
     if result.returncode != 0:
         print("[-] bench_crypto execution failed:")
@@ -35,61 +45,62 @@ def run_bench_crypto():
         return json.loads(result.stdout)
     except json.JSONDecodeError as e:
         print("[-] Could not parse bench_crypto output as JSON:", e)
+        print(result.stdout)
         sys.exit(1)
 
-def print_summary(results):
-    """Print benchmark summary in the requested tabular format."""
-    print("\n\n" + "="*70)
-    print("📈 PERFORMANCE OVERHEAD ANALYSIS")
-    print("="*70)
-    
-    header = f"| {'Metric':<25} | {'Insecure Baseline':<20} | {'Secure Hardened':<20} |"
-    divider = f"|{'-'*27}|{'-'*22}|{'-'*22}|"
-    
-    print(header)
-    print(divider)
-    
-    # Packets Per Second
-    pps_base = f"{results['throughput']['baseline']['packets_per_second']:.2f} pkts/sec"
-    pps_sec = f"{results['throughput']['hardened']['packets_per_second']:.2f} pkts/sec"
-    print(f"| {'Throughput (PPS)':<25} | {pps_base:<20} | {pps_sec:<20} |")
-    
-    # Average Latency (Convert microseconds to milliseconds)
-    lat_base = f"{results['latency']['baseline']['mean_us'] / 1000.0:.4f} ms"
-    lat_sec = f"{results['latency']['hardened']['mean_us'] / 1000.0:.4f} ms"
-    print(f"| {'Average Round-Trip Latency':<25} | {lat_base:<20} | {lat_sec:<20} |")
-    
-    # Maximum Jitter (Using standard deviation converted to milliseconds)
-    jit_base = f"{results['jitter']['baseline_stdev_us'] / 1000.0:.4f} ms"
-    jit_sec = f"{results['jitter']['hardened_stdev_us'] / 1000.0:.4f} ms"
-    print(f"| {'Maximum Jitter':<25} | {jit_base:<20} | {jit_sec:<20} |")
-    print("-" * 70)
-    
-    overhead = results['latency']['overhead_percent']
-    print(f"\n[!] Cryptographic Overhead Imposed: +{overhead:.2f}% latency per packet.")
-
 def run_comprehensive_benchmark():
+    """Compile bench_crypto.c, run it, and package/print the real results."""
+    print("\n" + "="*70)
+    print("IITI SOC 2026 - PS8: COMPREHENSIVE PERFORMANCE BENCHMARK (REAL)")
     print("="*70)
-    print("📊 IITI SOC 2026: END-TO-END PERFORMANCE BENCHMARKING (DOMAIN 4)")
+    print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*70)
 
-    # Compile silently to keep the output clean
     compile_bench_crypto()
-    
-    # Run the C backend which handles the real crypto timings
     results = run_bench_crypto()
     results["timestamp"] = datetime.now().isoformat()
 
-    # Simulate the visual run phases for output consistency
-    print(f"\n[*] Initiating Profiling Run: INSECURE_BASELINE")
-    print(f"[*] Pumping {NUM_PACKETS_THROUGHPUT} packets through the channel...")
-    print(f"    └── Completed in {results['throughput']['baseline']['total_time_sec']:.4f} seconds.")
-
-    print(f"\n[*] Initiating Profiling Run: SECURE_HARDENED")
-    print(f"[*] Pumping {NUM_PACKETS_THROUGHPUT} packets through the channel...")
-    print(f"    └── Completed in {results['throughput']['hardened']['total_time_sec']:.4f} seconds.")
+    print(f"Payload size: {results.get('payload_size_bytes')} bytes")
+    print(f"Methodology: {results.get('methodology')}\n")
 
     print_summary(results)
+    save_results_json(results)
+    return results
+
+def print_summary(results):
+    """Print benchmark summary"""
+    print("\n" + "="*70)
+    print("BENCHMARK RESULTS SUMMARY")
+    print("="*70)
+    
+    print("\n[LATENCY ANALYSIS]")
+    print(f"  Baseline Mean Latency : {results['latency']['baseline']['mean_us']:.4f} µs")
+    print(f"  Hardened Mean Latency : {results['latency']['hardened']['mean_us']:.4f} µs")
+    print(f"  Overhead              : {results['latency']['overhead_percent']:.2f}%")
+    
+    print("\n[THROUGHPUT ANALYSIS]")
+    print(f"  Baseline Packets/sec  : {results['throughput']['baseline']['packets_per_second']:.2f} pps")
+    print(f"  Hardened Packets/sec  : {results['throughput']['hardened']['packets_per_second']:.2f} pps")
+    print(f"  Throughput Reduction  : {results['throughput']['reduction_percent']:.2f}%")
+    
+    print("\n[PER-MECHANISM OVERHEAD]")
+    for key, value in results['overhead'].items():
+        if key != 'total_crypto_overhead_us':
+            print(f"  {value['mechanism']:<40} : {value['avg_time_us']:.4f} µs")
+    print(f"  Total Crypto Overhead for 256B : {results['overhead']['total_crypto_overhead_us']:.4f} µs")
+    
+    print("\n[JITTER ANALYSIS]")
+    print(f"  Baseline Jitter (σ)   : {results['jitter']['baseline_stdev_us']:.4f} µs")
+    print(f"  Hardened Jitter (σ)   : {results['jitter']['hardened_stdev_us']:.4f} µs")
+    
+    print("\n" + "="*70)
+
+def save_results_json(results):
+    """Save results to JSON file (next to this script)"""
+    output_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchmark_results.json")
+    with open(output_file, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"\n[+] Results saved to: {output_file}")
 
 if __name__ == "__main__":
-    run_comprehensive_benchmark()
+    results = run_comprehensive_benchmark()
