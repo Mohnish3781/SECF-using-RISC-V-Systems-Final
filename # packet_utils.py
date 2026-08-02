@@ -3,10 +3,6 @@
 import struct
 from dataclasses import dataclass
 
-# =====================================================
-# Constants (Must match packet.h)
-# =====================================================
-
 MAGIC_HEADER = 0xABCD1234
 
 MAX_PAYLOAD = 256
@@ -14,30 +10,11 @@ NONCE_SIZE = 12
 SALT_SIZE = 16
 TAG_SIZE = 16
 
-# =====================================================
-# Packet Layout
-#
-# uint32 header
-# uint8  type
-# uint8  src_id
-# uint8  dest_id
-# uint16 length
-# uint32 seq
-# uint32 timestamp
-# 12B nonce
-# 16B salt
-# 16B tag
-# 256B payload
-# =====================================================
-
 PACKET_FORMAT = "!IBBBHII12s16s16s256s"
 
 PACKET_SIZE = struct.calcsize(PACKET_FORMAT)
 
 
-# =====================================================
-# Packet Class
-# =====================================================
 
 @dataclass
 class Packet:
@@ -64,10 +41,6 @@ class Packet:
 
     payload: bytes = b''
 
-
-# =====================================================
-# Serialize Packet
-# =====================================================
 
 def serialize_packet(packet: Packet) -> bytes:
 
@@ -101,10 +74,6 @@ def serialize_packet(packet: Packet) -> bytes:
 
     )
 
-
-# =====================================================
-# Deserialize Packet
-# =====================================================
 
 def deserialize_packet(data: bytes) -> Packet:
 
@@ -140,10 +109,6 @@ def deserialize_packet(data: bytes) -> Packet:
     return pkt
 
 
-# =====================================================
-# Header used as AES-GCM AAD
-# =====================================================
-
 def get_authenticated_header(packet: Packet) -> bytes:
     """
     These fields are authenticated but NOT encrypted.
@@ -167,10 +132,6 @@ def get_authenticated_header(packet: Packet) -> bytes:
         packet.timestamp
     )
 
-
-# =====================================================
-# Print Packet
-# =====================================================
 
 def print_packet(packet: Packet):
 
