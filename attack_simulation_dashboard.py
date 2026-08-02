@@ -90,10 +90,10 @@ def generate_layman_animation(current_attack, phase, final_status=""):
 def create_layout(current_attack, completed_attacks, progress_msg, phase, final_status=""):
     """Builds the dynamic rich layout for the dashboard."""
     
-    # 1. Header (Updated text based on pro.jpeg annotation)
-    header = Text("🛡️ SECURE EMBEDDED COMMUNICATION 🛡️", style="bold red on black", justify="center")
+    # 1. Header (Emojis removed per pro_2.jpeg)
+    header = Text("SECURE EMBEDDED COMMUNICATION", style="bold red on black", justify="center")
     
-    # 2. Tracker & Live Execution Panel (Updated with Tracker)
+    # 2. Tracker & Live Execution Panel
     total_attacks = len(ATTACK_SCENARIOS)
     current_count = len(completed_attacks)
     
@@ -114,7 +114,7 @@ def create_layout(current_attack, completed_attacks, progress_msg, phase, final_
     report_table = generate_report_table(completed_attacks)
     report_panel = Panel(report_table, border_style="red")
 
-    # 4. Animated Flow Panel (New addition for laymen)
+    # 4. Animated Flow Panel
     animation_panel = generate_layman_animation(current_attack, phase, final_status)
 
     # 5. Footer Summary
@@ -173,15 +173,11 @@ def main():
             
             completed_attacks.append(attack_result)
             
-        # Final state
+        # Final state rendering before exiting
         live.update(create_layout(None, completed_attacks, "Done", "idle"))
+        time.sleep(1) # Brief pause to ensure the final layout renders cleanly to the terminal
         
-        # Keep the terminal up for a few seconds so the user can read the final report
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass 
+        # Infinite loop removed per pro_2.jpeg; code will now terminate naturally.
 
 if __name__ == "__main__":
     main()
