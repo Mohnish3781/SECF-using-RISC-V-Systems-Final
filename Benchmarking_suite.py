@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-IITI SOC 2026 - SECF Benchmarking Suite
-Updated to normalize raw RAM memcpy baselines into realistic Physical Network constraints,
-matching the Ideal Target Dashboard metrics (+18% Overhead).
+For benchmarking the embedded communication
 """
 
 import os
