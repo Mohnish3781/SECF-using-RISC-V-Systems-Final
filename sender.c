@@ -2,12 +2,15 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 #include "packet.h"
 
 int main() {
-
     Packet pkt;
+    const char *pipe_path = "/tmp/nodeA_to_attacker";
 
     pkt.header = MAGIC_HEADER;
     pkt.srcID = 1;
@@ -16,16 +19,25 @@ int main() {
     pkt.seq = 1;
     strcpy((char*)pkt.payload, "HELLO FROM NODE A");
     pkt.length = strlen((char*)pkt.payload);
-
-    int fd = open("/tmp/nodeA_to_attacker", O_WRONLY);
     pkt.checksum = 0;
 
-    for(int i = 0; i < pkt.length; i++)
-    {
+    for(int i = 0; i < pkt.length; i++) {
         pkt.checksum += pkt.payload[i];
     }
-    write(fd, &pkt, sizeof(Packet));
 
+    // Initialize pipeline if it doesn't exist
+    if (mkfifo(pipe_path, 0666) == -1 && errno != EEXIST) {
+        perror("[-] Pipe Creation Error");
+        return 1;
+    }
+
+    int fd = open(pipe_path, O_WRONLY);
+    if (fd < 0) {
+        perror("[-] Pipe Open Error");
+        return 1;
+    }
+
+    write(fd, &pkt, sizeof(Packet));
     close(fd);
 
     printf("Packet Sent\n");
