@@ -11,7 +11,7 @@ ATTACK_SCENARIOS = [
     {"name": "Packet Injection", "desc": "Injecting unauthorized data packets into the stream."},
     {"name": "Packet Modification (MITM)", "desc": "Altering payload bits in transit."},
     {"name": "Packet Dropping", "desc": "Simulating a blackhole/selective forwarding attack."},
-    {"name": "Packet Duplication", "desc": "Replaying previously captured valid packets."},
+    {"name": "Replay", "desc": "Replaying previously captured valid packets."}, # Updated per pro_3.jpeg
     {"name": "Packet Delay/Reordering", "desc": "Holding packets and sending them out of sequence."},
     {"name": "Malformed Packet Injection", "desc": "Sending packets with invalid headers/CRC."}
 ]
@@ -90,7 +90,7 @@ def generate_layman_animation(current_attack, phase, final_status=""):
 def create_layout(current_attack, completed_attacks, progress_msg, phase, final_status=""):
     """Builds the dynamic rich layout for the dashboard."""
     
-    # 1. Header (Emojis removed per pro_2.jpeg)
+    # 1. Header
     header = Text("SECURE EMBEDDED COMMUNICATION", style="bold red on black", justify="center")
     
     # 2. Tracker & Live Execution Panel
@@ -155,7 +155,7 @@ def main():
                 outcome = "Rejected (MAC/CRC Invalid)"
             elif attack['name'] == "Packet Dropping":
                 outcome = "Detected (Timeout/Retransmit)"
-            elif attack['name'] == "Packet Duplication":
+            elif attack['name'] == "Replay": # Updated logic check
                 outcome = "Rejected (Replay Protected)"
             elif attack['name'] == "Packet Delay/Reordering":
                 outcome = "Rejected"
@@ -177,7 +177,7 @@ def main():
         live.update(create_layout(None, completed_attacks, "Done", "idle"))
         time.sleep(1) # Brief pause to ensure the final layout renders cleanly to the terminal
         
-        # Infinite loop removed per pro_2.jpeg; code will now terminate naturally.
+        # Code terminates naturally
 
 if __name__ == "__main__":
     main()
