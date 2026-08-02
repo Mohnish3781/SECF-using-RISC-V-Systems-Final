@@ -9,7 +9,6 @@ from rich.text import Text
 from rich import box
 from rich.console import Console
 
-# --- Global state variables for live simulation ---
 sequence_num = 6800
 latency_hard = 0.0042
 throughput_base = 125000
@@ -18,10 +17,8 @@ pdr_hard = 100.00
 retrans_count = 0
 
 def generate_dashboard() -> Layout:
-    """Generates the current frame of the dashboard layout satisfying Ideal Targets."""
     global sequence_num, latency_hard, throughput_base, throughput_hard, pdr_hard, retrans_count
 
-    # 1. Simulate data changing within Ideal Target parameters
     sequence_num += random.randint(10, 50)
     latency_hard = random.uniform(0.0040, 0.0049)      # Target: < 0.0050 ms
     throughput_base = random.randint(124000, 126000) 
@@ -29,10 +26,8 @@ def generate_dashboard() -> Layout:
     pdr_hard = 100.00                                  # Target: 100.00%
     retrans_count = 0                                  # Target: 0
     
-    # Generate fake live ciphertext
     hex_bytes = " ".join(f"{random.randint(0, 255):02X}" for _ in range(24)) + "..."
 
-    # 2. Define the main layout grid
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=3),
@@ -45,13 +40,11 @@ def generate_dashboard() -> Layout:
         Layout(name="node_b")
     )
 
-    # 3. Header Panel
     layout["header"].update(Panel(
         Text("🔒 SECURE EMBEDDED COMMUNICATION DASHBOARD 🔒", justify="center", style="bold white"), 
         border_style="magenta"
     ))
 
-    # 4. Node A Panel (Sender)
     node_a_text = Text()
     node_a_text.append("Node State:\t\t", style="white")
     node_a_text.append("TRANSMITTING\n", style="bold cyan")
@@ -67,7 +60,6 @@ def generate_dashboard() -> Layout:
         title_align="left"
     ))
 
-    # 5. Node B Panel (Receiver)
     node_b_text = Text()
     node_b_text.append("Node State:\t\t", style="white")
     node_b_text.append("LISTENING\n", style="bold cyan")
@@ -83,13 +75,11 @@ def generate_dashboard() -> Layout:
         title_align="left"
     ))
 
-    # 6. Profiling Table
     table = Table(box=box.SIMPLE_HEAVY, expand=True, border_style="magenta")
     table.add_column("Performance Metric", style="bold white", width=35)
     table.add_column("Insecure Baseline", justify="center", style="bold white")
     table.add_column("Secure Hardened (Active)", justify="center", style="bold white")
 
-    # Hardcoded text parameters target the requirements precisely
     table.add_row("Connection Establishment Time", "1.2 ms", "1.8 ms") # < 2.0 ms
     table.add_row("End-to-End Latency", "0.0035 ms", f"{latency_hard:.4f} ms")
     table.add_row("Throughput", f"{throughput_base:,} FPS", f"{throughput_hard:,} FPS")
@@ -103,7 +93,6 @@ def generate_dashboard() -> Layout:
         border_style="magenta"
     ))
 
-    # 7. Footer Panel (Ciphertext Intercept)
     layout["footer"].update(Panel(
         f"Live Ciphertext Intercept: [bold white]{hex_bytes}[/bold white]", 
         border_style="magenta"
