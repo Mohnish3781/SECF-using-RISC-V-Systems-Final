@@ -2,16 +2,26 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 #include "packet.h"
 
 int main() {
     Packet pkt;
+    const char *pipe_path = "/tmp/attacker_to_nodeB";
 
-    printf("[*] Receiver Node Online. Listening continuously on /tmp/attacker_to_nodeB...\n");
+    // Initialize pipeline if it doesn't exist
+    if (mkfifo(pipe_path, 0666) == -1 && errno != EEXIST) {
+        perror("[-] Pipe Creation Error");
+        return 1;
+    }
+
+    printf("[*] Receiver Node Online. Listening continuously on %s...\n", pipe_path);
 
     while (1) {
-        int fd = open("/tmp/attacker_to_nodeB", O_RDONLY);
+        int fd = open(pipe_path, O_RDONLY);
         if (fd < 0) {
             perror("[-] Pipe Open Error");
             return 1;
@@ -35,12 +45,12 @@ int main() {
 
             if (pkt.header != MAGIC_HEADER) {
                 printf("\n[X] Invalid Header (0x%X) - Skipping...\n", pkt.header);
-                continue; // Use 'continue' instead of 'return 0' so receiver stays open
+                continue; 
             }
 
             if (checksum != pkt.checksum) {
                 printf("\n[X] Checksum Error! Calculated: %u, Received: %u - Skipping...\n", checksum, pkt.checksum);
-                continue; // Stay alive even on malformed frames
+                continue; 
             }
 
             printf("\n===== Packet Received =====\n");
@@ -52,7 +62,7 @@ int main() {
             printf("Payload     : %s\n", pkt.payload);
             printf("Checksum    : %u\n", pkt.checksum);
             printf("Sequence    : %u\n", pkt.seq);
-            fflush(stdout); // Flush buffer immediately to show log on screen
+            fflush(stdout); 
         }
 
         close(fd);
