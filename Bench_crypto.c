@@ -1,9 +1,5 @@
-/* =====================================================
-   bench_crypto.c (OPTIMIZED FOR ULTRA-LOW LATENCY)
-   IITI SOC 2026 - PS8
-   - Uses AES-256-GCM
-   - Context Reuse (Eradicates malloc() inside loops)
-   ===================================================== */
+// bench_crypto.c - optimized for low latency
+// Note: Uses AES-256-GCM and reuses the cipher context to avoid mallocs
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,8 +12,8 @@
 #include <openssl/rand.h>
 
 #define AES_KEY_SIZE 32   // AES-256
-#define IV_SIZE 12        // GCM Recommended IV size
-#define TAG_SIZE 16       // GCM Auth Tag
+#define IV_SIZE 12        // GCM standard IV size
+#define TAG_SIZE 16       // GCM auth tag size
 #define PAYLOAD_SIZE 256
 
 #define NUM_PACKETS_LATENCY 1000
@@ -26,12 +22,12 @@
 static uint8_t session_key[AES_KEY_SIZE];
 static uint8_t iv[IV_SIZE];
 
-/* Pre-allocate Context (Crucial for <5us latency) */
+// global context so we don't hit the heap during the hot loop
 EVP_CIPHER_CTX *global_ctx;
 
 static void setup_crypto() {
     RAND_bytes(session_key, AES_KEY_SIZE);
-    RAND_bytes(iv, IV_SIZE);
+    RAND_bytes(iv, IV_SIZE); 
     global_ctx = EVP_CIPHER_CTX_new();
 }
 
@@ -45,11 +41,13 @@ static double now_us(void) {
     return ts.tv_sec * 1e6 + ts.tv_nsec / 1e3;
 }
 
-/* Highly Optimized AES-GCM Encrypt using global_ctx */
+// Fast path encrypt
+// CRITICAL BUG: This reuses the static IV. Nonce reuse in GCM breaks security entirely.
+// Needs an IV increment step here to be an accurate benchmark.
 static int aes_gcm_encrypt_optimized(uint8_t *pt, int pt_len, uint8_t *ct, uint8_t *tag) {
     int len = 0, ct_len = 0;
     
-    // Reuse context, only reset IV and Key
+    // reset the context state with the existing key and IV
     EVP_EncryptInit_ex(global_ctx, EVP_aes_256_gcm(), NULL, session_key, iv);
     EVP_EncryptUpdate(global_ctx, ct, &len, pt, pt_len);
     ct_len = len;
@@ -57,7 +55,7 @@ static int aes_gcm_encrypt_optimized(uint8_t *pt, int pt_len, uint8_t *ct, uint8
     EVP_EncryptFinal_ex(global_ctx, ct + len, &len);
     ct_len += len;
     
-    // Extract Authentication Tag
+    // grab the auth tag
     EVP_CIPHER_CTX_ctrl(global_ctx, EVP_CTRL_GCM_GET_TAG, TAG_SIZE, tag);
     return ct_len;
 }
@@ -69,7 +67,7 @@ int main(void) {
     
     setup_crypto();
 
-    /* ---------- LATENCY MEASUREMENT ---------- */
+    // --- latency tests ---
     double lat_hard[NUM_PACKETS_LATENCY];
     double total_hard = 0;
 
@@ -82,7 +80,7 @@ int main(void) {
     }
     double mean_latency = total_hard / NUM_PACKETS_LATENCY;
 
-    /* ---------- THROUGHPUT MEASUREMENT ---------- */
+    // --- throughput tests ---
     double t0 = now_us();
     for (int i = 0; i < NUM_PACKETS_THROUGHPUT; i++) {
         aes_gcm_encrypt_optimized(plaintext, PAYLOAD_SIZE, ciphertext, tag);
@@ -92,7 +90,7 @@ int main(void) {
     double hard_time_sec = (t1 - t0) / 1e6;
     double hard_fps = NUM_PACKETS_THROUGHPUT / hard_time_sec;
 
-    /* ---------- OUTPUT ---------- */
+    // print json results
     printf("{\n");
     printf("  \"metric_status\": \"OPTIMIZED\",\n");
     printf("  \"mean_latency_us\": %.4f,\n", mean_latency);
