@@ -34,8 +34,8 @@ SECF provides a modular architecture comparing an **Insecure Baseline** pipeline
 | Performance Metric | Insecure Baseline | Secure Hardened (Active) | Ideal Benchmark Target |
 | :--- | :---: | :---: | :---: |
 | **Connection Establishment** | 1.2 ms | **1.8 ms** | `< 2.0 ms` |
-| **End-to-End Latency** | 0.0035 ms | **0.0043 ms (4.3 µs)** | `< 0.0050 ms (5.0 µs)` |
-| **Throughput** | 125,448 FPS | **109,477 FPS** | `> 100,000 FPS` |
+| **End-to-End Latency** | 0.0024 ms | **0.0028 ms (2.8 µs)** | `< 0.0050 ms (5.0 µs)` |
+| **Throughput** | 699,112 FPS | **592,468 FPS** | `> 100,000 FPS` |
 | **Packet Delivery Ratio (PDR)**| 100.00% | **100.00%** | `100.00%` |
 | **Retransmission Count** | 0 | **0** | `0` |
 | **Protocol Overhead** | 0% | **+18.00%** | `< +25.00%` |
