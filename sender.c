@@ -1,17 +1,30 @@
 #include <stdio.h>
 #include <string.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <errno.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/uart.h"
+#include "packet.h" // Ensures packed structs
 
-#include "packet.h"
+#define UART_NUM UART_NUM_2
+#define TX_PIN 17
+#define RX_PIN 16
 
-int main() {
+void app_main() {
     Packet pkt;
-    const char *pipe_path = "/tmp/nodeA_to_attacker";
+    
+    // Configure ESP32 Hardware UART
+    uart_config_t uart_config = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+    uart_driver_install(UART_NUM, 2048, 0, 0, NULL, 0);
+    uart_param_config(UART_NUM, &uart_config);
+    uart_set_pin(UART_NUM, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
+    // Build Packet Frame
     pkt.header = MAGIC_HEADER;
     pkt.srcID = 1;
     pkt.destID = 2;
@@ -25,22 +38,7 @@ int main() {
         pkt.checksum += pkt.payload[i];
     }
 
-    // Initialize pipeline if it doesn't exist
-    if (mkfifo(pipe_path, 0666) == -1 && errno != EEXIST) {
-        perror("[-] Pipe Creation Error");
-        return 1;
-    }
-
-    int fd = open(pipe_path, O_WRONLY);
-    if (fd < 0) {
-        perror("[-] Pipe Open Error");
-        return 1;
-    }
-
-    write(fd, &pkt, sizeof(Packet));
-    close(fd);
-
-    printf("Packet Sent\n");
-
-    return 0;
+    // Transmit over UART
+    uart_write_bytes(UART_NUM, (const char*)&pkt, sizeof(Packet));
+    printf("[*] Packet Sent via hardware UART\n");
 }
