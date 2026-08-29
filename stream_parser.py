@@ -1,42 +1,35 @@
 #!/usr/bin/env python3
-import os
 import sys
 import struct
 import binascii
+import serial
+import time
 
-PIPE_PATH = "/tmp/nodeA_to_attacker"
+# Hardware USB mappings replace /tmp/ pipes
+SERIAL_PORT = "/dev/ttyUSB0"
+BAUD_RATE = 115200
 
 HEADER_FORMAT = '<IBBBxH'
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)  
-
 REMAINDER_SIZE = 262
 
-
 def execute_two_phase_parser():
-    print("[*] Initializing Phase 2 / Week 3 Parsing Engine (C-Compatible)...")
+    print("[*] Initializing Phase 2 / Week 3 Parsing Engine (Hardware ESP32 Compatible)...")
+    print(f"[*] Opening hardware serial link on {SERIAL_PORT} @ {BAUD_RATE} baud...")
     
-    if not os.path.exists(PIPE_PATH):
-        os.mkfifo(PIPE_PATH)
-        print(f"[+] Created target communication channel endpoint: {PIPE_PATH}")
-
-    print(f"[*] Listening on {PIPE_PATH}...")
-    print("[*] Awaiting node connection (process will block until data writes occur)...")
-    
-    fd = os.open(PIPE_PATH, os.O_RDONLY)
-    print("[+] Link established! Reading binary stream sequentially.\n")
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=None)
+        print("[+] Hardware Link established! Reading binary stream sequentially.\n")
+    except serial.SerialException as e:
+        print(f"[-] Serial port error: {e}")
+        sys.exit(1)
 
     try:
         while True:
-            raw_header = os.read(fd, HEADER_SIZE)
+            # Phase 1: Header Block read via PySerial
+            raw_header = ser.read(HEADER_SIZE)
             
-            if not raw_header:
-                print("[*] Stream terminated by transmitter node. Awaiting reconnect...")
-                os.close(fd)
-                fd = os.open(PIPE_PATH, os.O_RDONLY)
-                continue
-
-            if len(raw_header) < HEADER_SIZE:
-                print("[-] Warning: Received partial header chunk. Dropping out-of-sync bytes.")
+            if not raw_header or len(raw_header) < HEADER_SIZE:
                 continue
 
             magic, src_id, dest_id, packet_type, payload_len = struct.unpack(HEADER_FORMAT, raw_header)
@@ -50,7 +43,8 @@ def execute_two_phase_parser():
             print(f"│  └── Dynamic Payload   : {payload_len} bytes calculated")
             print("├" + "─"*60)
 
-            raw_phase2_block = os.read(fd, REMAINDER_SIZE)
+            # Phase 2: Payload and Checksums via PySerial
+            raw_phase2_block = ser.read(REMAINDER_SIZE)
             
             if len(raw_phase2_block) < REMAINDER_SIZE:
                 print("[-] Warning: Remainder stream truncation detected. Dropping frame.")
@@ -76,9 +70,8 @@ def execute_two_phase_parser():
     except KeyboardInterrupt:
         print("\n[*] Parsing engine closed manually by engineer interrupt.")
     finally:
-        os.close(fd)
-        print("[*] Channel resource handle closed successfully.")
-
+        ser.close()
+        print("[*] Serial port resource handle closed successfully.")
 
 if __name__ == "__main__":
     execute_two_phase_parser()
