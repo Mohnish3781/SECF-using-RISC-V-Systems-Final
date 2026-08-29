@@ -1,162 +1,18 @@
-# packet_utils.py
-
 import struct
-from dataclasses import dataclass
-
-MAGIC_HEADER = 0xABCD1234
-
-MAX_PAYLOAD = 256
-NONCE_SIZE = 12
-SALT_SIZE = 16
-TAG_SIZE = 16
-
-PACKET_FORMAT = "!IBBBHII12s16s16s256s"
-
-PACKET_SIZE = struct.calcsize(PACKET_FORMAT)
-
-
-
-@dataclass
-class Packet:
-
-    header: int = MAGIC_HEADER
-
-    type: int = 1
-
-    src_id: int = 0
-
-    dest_id: int = 0
-
-    length: int = 0
-
-    seq: int = 0
-
-    timestamp: int = 0
-
-    nonce: bytes = bytes(NONCE_SIZE)
-
-    salt: bytes = bytes(SALT_SIZE)
-
-    tag: bytes = bytes(TAG_SIZE)
-
-    payload: bytes = b''
-
-
-def serialize_packet(packet: Packet) -> bytes:
-
-    payload = packet.payload.ljust(MAX_PAYLOAD, b'\x00')
-
-    return struct.pack(
-
-        PACKET_FORMAT,
-
-        packet.header,
-
-        packet.type,
-
-        packet.src_id,
-
-        packet.dest_id,
-
-        packet.length,
-
-        packet.seq,
-
-        packet.timestamp,
-
-        packet.nonce,
-
-        packet.salt,
-
-        packet.tag,
-
-        payload
-
-    )
-
-
-def deserialize_packet(data: bytes) -> Packet:
-
-    if len(data) != PACKET_SIZE:
-        raise ValueError("Invalid Packet Size")
-
-    fields = struct.unpack(PACKET_FORMAT, data)
-
-    pkt = Packet()
-
-    pkt.header = fields[0]
-
-    pkt.type = fields[1]
-
-    pkt.src_id = fields[2]
-
-    pkt.dest_id = fields[3]
-
-    pkt.length = fields[4]
-
-    pkt.seq = fields[5]
-
-    pkt.timestamp = fields[6]
-
-    pkt.nonce = fields[7]
-
-    pkt.salt = fields[8]
-
-    pkt.tag = fields[9]
-
-    pkt.payload = fields[10][:pkt.length]
-
-    return pkt
-
-
-def get_authenticated_header(packet: Packet) -> bytes:
-    """
-    These fields are authenticated but NOT encrypted.
-    """
-
-    return struct.pack(
-        "!IBBBHII",
-
-        packet.header,
-
-        packet.type,
-
-        packet.src_id,
-
-        packet.dest_id,
-
-        packet.length,
-
-        packet.seq,
-
-        packet.timestamp
-    )
-
-
-def print_packet(packet: Packet):
-
-    print("\n========== Packet ==========")
-
-    print(f"Header       : {hex(packet.header)}")
-
-    print(f"Type         : {packet.type}")
-
-    print(f"Source ID    : {packet.src_id}")
-
-    print(f"Destination  : {packet.dest_id}")
-
-    print(f"Length       : {packet.length}")
-
-    print(f"Sequence No. : {packet.seq}")
-
-    print(f"Timestamp    : {packet.timestamp}")
-
-    print(f"Nonce        : {packet.nonce.hex()}")
-
-    print(f"Salt         : {packet.salt.hex()}")
-
-    print(f"Tag          : {packet.tag.hex()}")
-
-    print(f"Payload      : {packet.payload}")
-
-    print("============================\n")
+import binascii
+
+# Hardware struct mapping (Matches #pragma pack(1) in C)
+# < (Little Endian), I (4B), B (1B), H (2B), s (char array)
+HARDWARE_PACKET_FORMAT = "<IBBBHII12s16s16s256s"
+PACKET_SIZE = struct.calcsize(HARDWARE_PACKET_FORMAT)
+
+def parse_hardware_frame(raw_bytes):
+    """Safely unwrap 317-byte ESP32 UART frames."""
+    if len(raw_bytes) != PACKET_SIZE:
+        raise ValueError(f"Frame size mismatch: Expected {PACKET_SIZE}, got {len(raw_bytes)}")
+        
+    return struct.unpack(HARDWARE_PACKET_FORMAT, raw_bytes)
+
+def calculate_telemetry_crc(raw_bytes):
+    """Calculates CRC32 for telemetry tracking without modifying the frame."""
+    return binascii.crc32(raw_bytes) & 0xFFFFFFFF
