@@ -1,72 +1,65 @@
 #include <stdio.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <stdint.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <errno.h>
-
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/uart.h"
 #include "packet.h"
 
-int main() {
+// ESP32 Hardware mappings
+#define UART_NUM UART_NUM_2
+#define TX_PIN 17
+#define RX_PIN 16
+#define BUF_SIZE 1024
+
+void app_main() {
     Packet pkt;
-    const char *pipe_path = "/tmp/attacker_to_nodeB";
+    
+    // Configure ESP32 Hardware UART
+    uart_config_t uart_config = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+    uart_driver_install(UART_NUM, BUF_SIZE, 0, 0, NULL, 0);
+    uart_param_config(UART_NUM, &uart_config);
+    uart_set_pin(UART_NUM, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
-    // Initialize pipeline if it doesn't exist
-    if (mkfifo(pipe_path, 0666) == -1 && errno != EEXIST) {
-        perror("[-] Pipe Creation Error");
-        return 1;
-    }
-
-    printf("[*] Receiver Node Online. Listening continuously on %s...\n", pipe_path);
+    printf("[*] Receiver Node Online. Listening continuously on UART%d...\n", UART_NUM);
 
     while (1) {
-        int fd = open(pipe_path, O_RDONLY);
-        if (fd < 0) {
-            perror("[-] Pipe Open Error");
-            return 1;
+        // Read directly from the ESP32 RX buffer with a FreeRTOS delay instead of POSIX read()
+        int bytes_read = uart_read_bytes(UART_NUM, (uint8_t*)&pkt, sizeof(Packet), portMAX_DELAY);
+
+        if (bytes_read < (int)sizeof(Packet)) {
+            continue;
         }
 
-        while (1) {
-            ssize_t bytes_read = read(fd, &pkt, sizeof(Packet));
-
-            if (bytes_read == 0) {
-                break; // Break inner loop to re-open pipe and wait for next transmission
-            }
-
-            if (bytes_read < (ssize_t)sizeof(Packet)) {
-                continue;
-            }
-
-            uint16_t checksum = 0;
-            for (int i = 0; i < pkt.length && i < MAX_PAYLOAD; i++) {
-                checksum += pkt.payload[i];
-            }
-
-            if (pkt.header != MAGIC_HEADER) {
-                printf("\n[X] Invalid Header (0x%X) - Skipping...\n", pkt.header);
-                continue; 
-            }
-
-            if (checksum != pkt.checksum) {
-                printf("\n[X] Checksum Error! Calculated: %u, Received: %u - Skipping...\n", checksum, pkt.checksum);
-                continue; 
-            }
-
-            printf("\n===== Packet Received =====\n");
-            printf("Header      : 0x%X\n", pkt.header);
-            printf("Source ID   : %d\n", pkt.srcID);
-            printf("Destination : %d\n", pkt.destID);
-            printf("Type        : %d\n", pkt.type);
-            printf("Length      : %d\n", pkt.length);
-            printf("Payload     : %s\n", pkt.payload);
-            printf("Checksum    : %u\n", pkt.checksum);
-            printf("Sequence    : %u\n", pkt.seq);
-            fflush(stdout); 
+        uint16_t checksum = 0;
+        for (int i = 0; i < pkt.length && i < MAX_PAYLOAD; i++) {
+            checksum += pkt.payload[i];
         }
 
-        close(fd);
+        if (pkt.header != MAGIC_HEADER) {
+            printf("\n[X] Invalid Header (0x%X) - Skipping...\n", pkt.header);
+            continue; 
+        }
+
+        if (checksum != pkt.checksum) {
+            printf("\n[X] Checksum Error! Calculated: %u, Received: %u - Skipping...\n", checksum, pkt.checksum);
+            continue; 
+        }
+
+        printf("\n===== Packet Received =====\n");
+        printf("Header      : 0x%X\n", pkt.header);
+        printf("Source ID   : %d\n", pkt.srcID);
+        printf("Destination : %d\n", pkt.destID);
+        printf("Type        : %d\n", pkt.type);
+        printf("Length      : %d\n", pkt.length);
+        printf("Payload     : %s\n", pkt.payload);
+        printf("Checksum    : %u\n", pkt.checksum);
+        printf("Sequence    : %u\n", pkt.seq);
+        fflush(stdout); 
     }
-
-    return 0;
 }
